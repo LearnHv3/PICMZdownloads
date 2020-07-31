@@ -1,0 +1,586 @@
+
+/*********************************************************/
+/*********************************************************/
+/*    Figure 5-11.  clks.h                               */
+/*********************************************************/
+/*********************************************************/
+
+/**********************************************************************  MPLAB Harmony Application Header File  File Name:    clks.h***********************************************************************/#ifndef _CLKS_H#define _CLKS_H//********************************************************************// Section: Type Definitions - CLKS module//********************************************************************typedef enum{    /* Application's state machine's initial state. */    CLKS_STATE_INIT=0,    /* TODO: Define states used by the application state machine. */    CLKS_STATE_EVENT,    CLKS_STATE_IDLE} CLK_STATES;typedef struct{    CLK_STATES clkstate;   // the current state    int idlecnt;   // counts the number of times in the CLKS_STATE_IDLE    unsigned int cpucycles;  // records the CPU cycles every second    unsigned int last_CP0;  // the last core timer count    int idlecntpersec;      // the idle count at the end of every second} CLKDATA;typedef struct{    int ticks;          // counts timer interrupts    int timeout;        // number of ticks for timeout    void (*action)();	// the method to execute when a timeout occurs} SUBCLK;//********************************************************************// Section: Application Initialization and State Machine Functions//********************************************************************void CLKS_Initialize ( void );  // This routine is called from APPS_Initialize() void CLKS_SM( void );    // This routine is called from APP_Tasks()void clk1000(void);      // the 1-second clockvoid clk100(void);       // the 100 msecond clock#endif /* _CLKS_H */
+
+/*********************************************************/
+/*********************************************************/
+/*    Figure 5-13.  clks.c                               */
+/*********************************************************/
+/*********************************************************/
+
+/********************************************************************  MPLAB Harmony Application Source File    File Name:    clks.c ********************************************************************/#include "app.h"#define LED4BLACK   {LED4B_Set();LED4G_Set();LED4R_Set();}#define LED4WHITE   {LED4B_Clear();LED4G_Clear();LED4R_Clear();}#define LED4RED     {LED4B_Set();LED4G_Set();LED4R_Clear();}#define LED4GREEN   {LED4B_Set();LED4G_Clear();LED4R_Set();}#define LED4BLUE    {LED4B_Clear();LED4G_Set();LED4R_Set();}#define LED4YELLOW  {LED4B_Set();LED4G_Clear();LED4R_Clear();}#define LED4MAGENTA {LED4B_Clear();LED4G_Set();LED4R_Clear();}#define LED4CYAN    {LED4B_Clear();LED4G_Clear();LED4R_Set();}//********************************************************************// Section: Global Data Definitions//********************************************************************extern APPDATA appData;CLKDATA clkData;SUBCLK clkCfg[] = {// ticks, timeout, action routine{ 0, 1000, clk1000},{ 0, 100,  clk100},{ 0, 0, NULL}};//********************************************************************// Section: Application Callback Functions//********************************************************************void TMR_CallbackFn (uint32_t status,uintptr_t context );void TMR_CallbackFn (uint32_t status,uintptr_t context ){    /* this will only happen after the timer is started */    clkData.clkstate = CLKS_STATE_EVENT; }//********************************************************************// Section: Application Initialization and State Machine Functions//********************************************************************void CLKS_Initialize ( void ){        clkData.cpucycles = 0;    clkData.last_CP0 = 0;    clkData.idlecnt = 0;    clkData.idlecntpersec = 0;    clkData.clkstate = CLKS_STATE_INIT;     }#define PERIODMS  99999     // microseconds*100 = 1  ms for a 100 MHz CPUvoid CLKS_SM ( void ){    SUBCLK *p;		// ptr to a SUBCLK object    switch(clkData.clkstate)    {        case CLKS_STATE_INIT:            // Register the timer callback function             TMR2_Stop();            TMR2_CallbackRegister(TMR_CallbackFn, NULL);                            TMR2_PeriodSet(PERIODMS); // Set the period (ms)                            TMR2_Start();           // Start the timer                        LogMsg("The 1 millisecond timer has started");            clkData.clkstate = CLKS_STATE_IDLE;             break;                    case CLKS_STATE_EVENT:            // update the msec counter used in LogMsgs            appData.msec_cnt++;                        // check all the clock timers             // execute an action if a timeout occurred            for(p = clkCfg; p->timeout > 0; p++)            {                p->ticks++;                if(p->ticks >= p->timeout)                {                    p->action();   // execute this routine                    p->ticks = 0;                }            }            clkData.clkstate = CLKS_STATE_IDLE;             break;                   case CLKS_STATE_IDLE:    // count the number of times through this loop            clkData.idlecnt++;                                              break;                }}void clk1000(void){    static int substate;    clkData.cpucycles = _CP0_GET_COUNT() - clkData.last_CP0;   // cycles/sec    clkData.last_CP0 = _CP0_GET_COUNT();    // store the current value    clkData.idlecntpersec = clkData.idlecnt;    // store the idle counter    clkData.idlecnt = 0;                        // reset the idle counter    // cycle the multicolored LED through all the combos    substate++;    if(substate == 1) LED4WHITE    else if(substate == 2) LED4RED    else if(substate == 3) LED4GREEN    else if(substate == 4) LED4BLUE    else if(substate == 5) LED4YELLOW    else if(substate == 6) LED4CYAN    else if(substate == 7) LED4MAGENTA    else LED4BLACK    if(substate > 7) substate = 0;        // toggle the LEDs while button is not pressed    if(SW4_Get())      {        LED1_Toggle();        LED2_Toggle();        LED3_Toggle();    }            // update the global time variables    appData.unixsecs++;             // update the UNIX time by 1 second    appData.msec_cnt = 0;           // synch with the unixsecs update//  LogMsg("One second elapsed");   // add a log message to the circular buffer  }// routine to monitor the each switch and set the associated LED accordinglyvoid clk100(void){    if(!SW1_Get())  LED1_Toggle();    if(!SW2_Get())  LED2_Toggle();    if(!SW3_Get())  LED3_Toggle();    if(!SW4_Get())      {        LED1_Set();     // OFF        LED2_Set();     // OFF        LED3_Set();     // OFF    }}/***************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 5-14.  app.h – MZEF_base (Chapter 5)        */
+/*********************************************************/
+/*********************************************************/
+
+/********************************************************************  MPLAB Harmony Application Header File  Company:    Microchip Technology Inc.  File Name:    app.h*********************************************************************/#ifndef _APP_H#define _APP_H#include <stdint.h>#include <stdbool.h>#include <stddef.h>#include <stdlib.h>#include <string.h>#include <stdio.h>#include <stdarg.h>#include "definitions.h"#include "configuration.h"#include "clks.h"#ifdef __cplusplus  // Provide C++ Compatibilityextern "C" {#endif    #define MAXMSGS  50#define MSGCOLS  120#define BOY2015  1420070400UL	//UNIX time at 1/1/2015 00:00:00// *******************************************************************// Section: State Definitions and State Data// *******************************************************************typedef struct{    int msec_cnt;                   // used in LogMsg    unsigned int unixsecs;          // used in LogMsg    char logmessages[MAXMSGS][MSGCOLS+1]; // space for MAXMSGS messages    int msgput;                // index of next message to be added    int msgget;         // index of next message to write to a com port } APPDATA;#undef SYS_DEBUG_PRINT#define SYS_DEBUG_PRINT(level, fmt, ...)    do { if((level) <= SYS_ERROR_DEBUG) LogMsg(fmt, ##__VA_ARGS__); } while (0)#undef SYS_ERROR_PRINT#define SYS_ERROR_PRINT(level, fmt, ...)    do { if((level) <= SYS_ERROR_DEBUG) LogMsg(fmt, ##__VA_ARGS__); } while (0)#undef SYS_ERROR#define SYS_ERROR(level,fmt, ...)   do { if((level) <= SYS_ERROR_DEBUG) LogMsg(fmt, ##__VA_ARGS__); } while (0)#undef SYS_CONSOLE_PRINT#define SYS_CONSOLE_PRINT(fmt, ...)    do { LogMsg(fmt, ##__VA_ARGS__); } while (0)#undef SYS_CONSOLE_MESSAGE#define SYS_CONSOLE_MESSAGE(fmt, ...)    do { LogMsg(fmt, ##__VA_ARGS__); } while (0)// *******************************************************************// Section: Prototypes// *******************************************************************void APP_Initialize ( void );void APP_Tasks( void );void LogMsg(const char *format, ...);void get_dt(char *str);#endif /* _APP_H */#ifdef __cplusplus}#endif/******************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 5-15.  app.c – MZEF_base (Chapter 5)        */
+/*********************************************************/
+/*********************************************************/
+/*********************************************************************
+  MPLAB Harmony Application Source File
+
+  File Name:
+    app.c
+
+*********************************************************************/
+
+#include "app.h"
+
+APPDATA appData;
+
+// *****************************************************************
+// Section: Application Initialization and State Machine Functions
+// *****************************************************************
+
+void APP_Initialize ( void )
+{
+    appData.msec_cnt = 0;
+    appData.unixsecs = BOY2015;     // temporary for now   
+    appData.msgget = 0;
+    appData.msgput = 0;
+    memset(appData.logmessages, 0, sizeof(appData.logmessages));
+    CLKS_Initialize();
+}
+
+void APP_Tasks ( void )
+{
+    CLKS_SM();      // the CLKS state machine
+}
+
+// *******************************************************************
+// Section: Application Local Functions
+// *******************************************************************
+#define DAYSECS	86400		// seconds per day
+#define YRSECS	DAYSECS*365	// seconds per year
+
+int dmon[13] = {31,28,31,30,31,30,31,31,30,31,30,31,0};
+const char mond[12][4]={"JAN","FEB","MAR","APR","MAY","JUN", "JUL","AUG","SEP","OCT","NOV","DEC"};
+const char *badtime = "**-***-**** **:**:**.***";
+
+//*****************************************************************
+// Add a time tag and write a log message into the message buffer
+//*****************************************************************
+
+void LogMsg(const char *format, ...)
+{
+    int len = 0;
+    char ascdt[28];			// constructed ascii time string
+    char tmpBuf[MSGCOLS+1];
+    char str[MSGCOLS-30];
+    memset(ascdt, 0, sizeof(ascdt));
+    memset(tmpBuf, 0, sizeof(tmpBuf));
+    memset(str, 0, sizeof(str));
+
+    get_dt(tmpBuf);
+
+    va_list args = (va_list){0};
+
+    va_start( args, format );
+
+    len = vsnprintf(str, MSGCOLS-30, format, args);     // leave space for \n\r
+
+    va_end( args );
+
+    if (len > 0 && len < MSGCOLS-30)
+    {
+        str[len] = '\0';
+        strncat(tmpBuf, str, MSGCOLS-30);	//do not overrun tmpBuf
+        strcat(tmpBuf,"\n\r");        
+        strcpy(appData.logmessages[appData.msgput], tmpBuf);
+        appData.msgput++;
+        if(appData.msgput > (MAXMSGS-1)) appData.msgput = 0;  //rollover
+    }
+}
+
+void get_dt(char *str)
+{
+	int yr, mon, dd, hh, mm, ss;
+	long tsecs;
+	int isecs, ysecs, dsecs;
+	int err;
+    char timenow[28];
+
+	err = 0;		// no error (yet)
+	mon=0;
+	yr=0;
+	isecs=0;
+    ysecs = 0;
+    dsecs = 0;
+    tsecs = 0;
+	memset(timenow,0,sizeof(timenow));
+
+    tsecs = appData.unixsecs;
+	tsecs -= BOY2015;
+	// get the year, month, day
+	for(yr=2015,isecs=0; yr<2100; yr++)
+	{
+	    ysecs = YRSECS;
+            // adjust for leap year
+	    if((yr%4) == 0) {ysecs += DAYSECS; dmon[1]++;}	
+	    if((isecs+ysecs) > tsecs)	// tsecs are in the current year
+	    {
+            tsecs -= isecs;
+            break; // found the current year
+	    }
+	    else isecs += ysecs;	// add a year and keep looking
+	}
+	if(yr > 2099)
+	{
+//	    LogMsg("Date/Time error finding the year");
+	    err = 1;
+	}
+	else
+	{
+	    for(mon=0,isecs=0; mon<12; mon++)
+	    {
+              dsecs = dmon[mon]*DAYSECS;
+              if((isecs + dsecs) > tsecs)
+              {
+                tsecs -= isecs;
+                break;
+              }
+              else isecs += dsecs;	// add a month and keep looking
+	    }
+	    if(mon > 11)
+	    {
+//            LogMsg("Date/Time error finding the month");
+              err = 1;
+	    }
+	}
+
+	// get the hh:mm:ss
+	dd = tsecs/DAYSECS;
+	tsecs -= (dd*DAYSECS);
+	dd++;                   // days start at 1
+	hh = tsecs/3600;
+	tsecs -= hh*3600;
+	mm = tsecs/60;
+	tsecs -= mm*60;
+	ss = tsecs;
+	if(ss < 0) err=1;
+
+	if(err) strcpy(timenow,badtime);
+	else	sprintf(timenow,"%02d-%s-%04d %02d:%02d:%02d.%03d ",
+	               dd,mond[mon],yr,hh,mm,ss,appData.msec_cnt);
+	// transfer the results back to the calling program
+	strcpy(str,timenow);
+	return;
+}
+
+/*******************************************************************
+ End of File
+ */
+/*********************************************************/
+/*********************************************************/
+/*    Figure 6-27.  cdc.h                                */
+/*********************************************************/
+/*********************************************************/
+
+/********************************************************************  MPLAB Harmony Application Header File  File Name:    cdc.h********************************************************************/#ifndef _CDC_H#define _CDC_H#define COM1 USB_DEVICE_CDC_INDEX_0#define COM2 USB_DEVICE_CDC_INDEX_1// CDC states enumerationtypedef enum{    CDC_STATE_NONE=0,    CDC_STATE_INIT,    CDC_STATE_WAIT_FOR_CONFIGURATION,    CDC_STATE_CHECK_IF_CONFIGURED,    CDC_STATE_CHECK_FOR_READ_COMPLETE,    CDC_STATE_CHECK_FOR_WRITE_COMPLETE,    CDC_STATE_WAIT_FOR_WRITE_COMPLETE,    CDC_STATE_ERROR} CDC_STATES;// *******************************************************************// CDC Object Data// *******************************************************************//******************************************************// COM Ports Data//******************************************************typedef struct{    USB_DEVICE_CDC_INDEX cdcInstance;    USB_CDC_LINE_CODING setLineCodingData;    USB_CDC_LINE_CODING getLineCodingData;    USB_CDC_CONTROL_LINE_STATE controlLineStateData;    uint16_t breakData;    USB_DEVICE_CDC_TRANSFER_HANDLE readTransferHandle;    USB_DEVICE_CDC_TRANSFER_HANDLE writeTransferHandle;    bool isReadComplete;    bool isWriteComplete;    uint32_t readDataLength;}CDC_COM_PORT;typedef struct{    USB_DEVICE_HANDLE deviceHandle;  // returned by device open function    CDC_STATES state;    bool isConfigured;    CDC_COM_PORT cdcCOMPorts[2];    // the data for the 2 COM ports} CDC_DATA;// *******************************************************************// Section: Application Initialization and State Machine Functions// *******************************************************************void CDC_Initialize (void);  // Routine is called from APP_Initialize()void CDC_SM( void );         // Routine is called from APP_Tasks()void CDC_StateReset(void);void USBDeviceEventHandler(USB_DEVICE_EVENT event,                            void * pData, uintptr_t context);USB_DEVICE_CDC_EVENT_RESPONSE CDC_USBDeviceCDCEventHandler   (USB_DEVICE_CDC_INDEX index, USB_DEVICE_CDC_EVENT event,    void* pData, uintptr_t userData);void WriteLogMsgs(void);#endif /* _CDC_H *//*********************************************************/
+/*********************************************************/
+/*    Figure 6-28.  cdc.c                                */
+/*********************************************************/
+/*********************************************************/
+
+/*******************************************************************  MPLAB Harmony Application Source File    File Name:    cdc.c *******************************************************************/#include "app.h"// *****************************************************************// *****************************************************************// Section: Global Data Definitions// *****************************************************************// *****************************************************************/* Application Data*    Application strings and buffers are be defined outside this structure.*/extern APPDATA appData;CDC_DATA cdcData;#define COM1 USB_DEVICE_CDC_INDEX_0#define COM2 USB_DEVICE_CDC_INDEX_1#define CDC_READ_BUFFER_SIZE 512#define CDC_WRITE_BUFFER_SIZE 256/* Fulfill USB DMA transfer criteria */#ifdef __PIC32MZ  #define CDC_MAKE_BUFFER_DMA_READY  __attribute__((aligned(16))) __attribute__((coherent))#else  #define CDC_MAKE_BUFFER_DMA_READY  __attribute__((aligned(16)))#endifuint8_t com1ReadBuffer[CDC_READ_BUFFER_SIZE] CDC_MAKE_BUFFER_DMA_READY;uint8_t com1WriteBuffer[CDC_WRITE_BUFFER_SIZE] CDC_MAKE_BUFFER_DMA_READY;uint8_t com2ReadBuffer[CDC_READ_BUFFER_SIZE] CDC_MAKE_BUFFER_DMA_READY;uint8_t com2WriteBuffer[CDC_WRITE_BUFFER_SIZE] CDC_MAKE_BUFFER_DMA_READY;// *****************************************************************// Section: Application Initialization and State Machine Functions// *****************************************************************// This application sets up COM1 as a system terminal port and COM2 as a log port// Both ports can read and write, but the log messages port only send out log messagesvoid CDC_Initialize ( void ){    /* Initialize the application object -- DO NOT INIT MHC stuff */    cdcData.deviceHandle = USB_DEVICE_HANDLE_INVALID;    cdcData.isConfigured = false;    cdcData.cdcCOMPorts[COM1].getLineCodingData.dwDTERate = 115200;    cdcData.cdcCOMPorts[COM1].getLineCodingData.bDataBits = 8;    cdcData.cdcCOMPorts[COM1].getLineCodingData.bParityType = 0;    cdcData.cdcCOMPorts[COM1].getLineCodingData.bCharFormat = 0;    cdcData.cdcCOMPorts[COM2].getLineCodingData.dwDTERate = 115200;    cdcData.cdcCOMPorts[COM2].getLineCodingData.bDataBits = 8;    cdcData.cdcCOMPorts[COM2].getLineCodingData.bParityType = 0;    cdcData.cdcCOMPorts[COM2].getLineCodingData.bCharFormat = 0;    cdcData.cdcCOMPorts[COM1].readTransferHandle = USB_DEVICE_CDC_TRANSFER_HANDLE_INVALID;    cdcData.cdcCOMPorts[COM1].writeTransferHandle = USB_DEVICE_CDC_TRANSFER_HANDLE_INVALID;    cdcData.cdcCOMPorts[COM1].isReadComplete = true;    cdcData.cdcCOMPorts[COM1].isWriteComplete = false;    cdcData.cdcCOMPorts[COM2].readTransferHandle = USB_DEVICE_CDC_TRANSFER_HANDLE_INVALID;    cdcData.cdcCOMPorts[COM2].writeTransferHandle = USB_DEVICE_CDC_TRANSFER_HANDLE_INVALID;    cdcData.cdcCOMPorts[COM2].isReadComplete = true;    cdcData.cdcCOMPorts[COM2].isWriteComplete = false;       cdcData.cdcCOMPorts[COM1].readDataLength = 1;    cdcData.cdcCOMPorts[COM2].readDataLength = 1;        cdcData.state = CDC_STATE_INIT;     }void CDC_SM ( void ){    switch(cdcData.state)    {        case CDC_STATE_INIT:            /* Open the device layer */            cdcData.deviceHandle = USB_DEVICE_Open( USB_DEVICE_INDEX_0, DRV_IO_INTENT_READWRITE );            if(cdcData.deviceHandle != USB_DEVICE_HANDLE_INVALID)            {                /* Register a callback with device layer to get event notification (for end point 0) */                /* These events and data are from the USB device layer */                /* The last parameter is the "context" - not used      */                USB_DEVICE_EventHandlerSet(cdcData.deviceHandle, USBDeviceEventHandler, 0);                /* set the state to wait for the configuration to complete which establishes another */                /* event handler for the CDC device events and data */                cdcData.state = CDC_STATE_WAIT_FOR_CONFIGURATION;            }            else            {                /* The Device Layer did not open - try again */            }                       break;                    case CDC_STATE_WAIT_FOR_CONFIGURATION:            /* Check if the device was configured successfully */           if(cdcData.isConfigured)            {                /* If the device is configured then lets start                 * the application by issuing a write  */                memset(com1ReadBuffer, 0, sizeof(com1ReadBuffer));                strcpy((char *)com1WriteBuffer,"Ready>");                USB_DEVICE_CDC_Write(COM1,                        &cdcData.cdcCOMPorts[COM1].writeTransferHandle,                        com1WriteBuffer, strlen((char *)com1WriteBuffer),                        USB_DEVICE_CDC_TRANSFER_FLAGS_DATA_COMPLETE);                cdcData.cdcCOMPorts[COM1].isWriteComplete = false;                cdcData.cdcCOMPorts[COM1].isReadComplete = false;                LogMsg("CDC configuration complete");                                      cdcData.cdcCOMPorts[COM1].isWriteComplete = true;     // kick start COM1                cdcData.cdcCOMPorts[COM2].isWriteComplete = true;     // kick start COM2                cdcData.state = CDC_STATE_CHECK_IF_CONFIGURED;            }            break;                   case CDC_STATE_CHECK_IF_CONFIGURED:            if(cdcData.isConfigured)            {                cdcData.state = CDC_STATE_CHECK_FOR_READ_COMPLETE;            }            else            {                CDC_StateReset();                cdcData.state = CDC_STATE_WAIT_FOR_CONFIGURATION;            }            break;       case CDC_STATE_CHECK_FOR_READ_COMPLETE:            if(cdcData.cdcCOMPorts[COM1].isReadComplete)            {                /* This means we got data on COM1. Do something (echo the char) */                USB_DEVICE_CDC_Write(COM1,                        &cdcData.cdcCOMPorts[COM1].writeTransferHandle,                        com1ReadBuffer, 1,                        USB_DEVICE_CDC_TRANSFER_FLAGS_DATA_COMPLETE);                cdcData.cdcCOMPorts[COM1].isReadComplete = false;            }            // there is no ReadComplete on COM2 -- it is output only            cdcData.state = CDC_STATE_CHECK_FOR_WRITE_COMPLETE;            break;                   case CDC_STATE_CHECK_FOR_WRITE_COMPLETE:                       if(cdcData.cdcCOMPorts[COM1].isWriteComplete)            {                /* zero the buffer and issue another read request */                memset(com1ReadBuffer, 0, sizeof(com1ReadBuffer));                USB_DEVICE_CDC_Read(COM1,                        &cdcData.cdcCOMPorts[COM1].readTransferHandle,                        com1ReadBuffer, CDC_READ_BUFFER_SIZE);                cdcData.cdcCOMPorts[COM1].isWriteComplete = false;                cdcData.cdcCOMPorts[COM1].isReadComplete = false;            }                      // check for any unsent messages on COM2            if(cdcData.cdcCOMPorts[COM2].isWriteComplete) WriteLogMsgs();                        cdcData.state = CDC_STATE_CHECK_IF_CONFIGURED;            break;        case CDC_STATE_ERROR:            break;        default:            break;    }}/************************************************ * CDC (COM1 & COM2) Application Event Handler ************************************************/USB_DEVICE_CDC_EVENT_RESPONSE CDC_USBDeviceCDCEventHandler(    USB_DEVICE_CDC_INDEX index ,    USB_DEVICE_CDC_EVENT event ,    void* pData,    uintptr_t userData){    CDC_DATA * cdcDataObject;    cdcDataObject = (CDC_DATA *)userData;    USB_CDC_CONTROL_LINE_STATE * controlLineStateData;    uint16_t * breakData;    USB_DEVICE_CDC_EVENT_DATA_READ_COMPLETE *eventDataRead;     switch ( event )    {        case USB_DEVICE_CDC_EVENT_GET_LINE_CODING:             /* This means the host wants to know the current line             * coding. This is a control transfer request. Use the             * USB_DEVICE_ControlSend() function to send the data to             * host. */             USB_DEVICE_ControlSend(cdcDataObject->deviceHandle,                    &cdcDataObject->cdcCOMPorts[index].getLineCodingData,                    sizeof(USB_CDC_LINE_CODING));            break;        case USB_DEVICE_CDC_EVENT_SET_LINE_CODING:            /* This means the host wants to set the line coding.             * This is a control transfer request. Use the             * USB_DEVICE_ControlReceive() function to receive the             * data from the host */            USB_DEVICE_ControlReceive(cdcDataObject->deviceHandle,                    &cdcDataObject->cdcCOMPorts[index].setLineCodingData,                    sizeof(USB_CDC_LINE_CODING));            break;        case USB_DEVICE_CDC_EVENT_SET_CONTROL_LINE_STATE:            /* This means the host is setting the control line state.             * Read the control line state. We will accept this request             * for now. */            controlLineStateData = (USB_CDC_CONTROL_LINE_STATE *)pData;            cdcDataObject->cdcCOMPorts[index].controlLineStateData.dtr = controlLineStateData->dtr;            cdcDataObject->cdcCOMPorts[index].controlLineStateData.carrier = controlLineStateData->carrier;            USB_DEVICE_ControlStatus(cdcDataObject->deviceHandle, USB_DEVICE_CONTROL_STATUS_OK);            break;        case USB_DEVICE_CDC_EVENT_SEND_BREAK:            /* This means that the host is requesting that a break of the             * specified duration be sent. Read the break duration */            breakData = (uint16_t *)pData;            cdcDataObject->cdcCOMPorts[index].breakData = *breakData;            USB_DEVICE_ControlStatus(cdcDataObject->deviceHandle, USB_DEVICE_CONTROL_STATUS_OK);            break;        case USB_DEVICE_CDC_EVENT_READ_COMPLETE:            /* This means that the host has sent some data*/            eventDataRead =  (USB_DEVICE_CDC_EVENT_DATA_READ_COMPLETE *)pData;                         if(eventDataRead->status != USB_DEVICE_CDC_RESULT_ERROR)            {               cdcDataObject->cdcCOMPorts[index].readDataLength = eventDataRead->length;                cdcDataObject->cdcCOMPorts[index].isReadComplete = true;            }                        break;        case USB_DEVICE_CDC_EVENT_CONTROL_TRANSFER_DATA_RECEIVED:            /* The data stage of the last control transfer is             * complete. For now we accept all the data */            USB_DEVICE_ControlStatus(cdcDataObject->deviceHandle, USB_DEVICE_CONTROL_STATUS_OK);            break;        case USB_DEVICE_CDC_EVENT_CONTROL_TRANSFER_DATA_SENT:             /* This means the GET LINE CODING function data is valid. We don't             * do much with this data in this demo. */            break;        case USB_DEVICE_CDC_EVENT_WRITE_COMPLETE:            /* This means that the data write got completed. We can schedule             * the next read. */            cdcDataObject->cdcCOMPorts[index].isWriteComplete = true;            break;        default:            break;    }    return USB_DEVICE_CDC_EVENT_RESPONSE_NONE;}/************************************************* * USB Device Layer Event Handler *************************************************/void USBDeviceEventHandler(USB_DEVICE_EVENT event, void * pData, uintptr_t context){    uint8_t configurationValue;    switch( event )    {        case USB_DEVICE_EVENT_RESET:        case USB_DEVICE_EVENT_DECONFIGURED:            /* Device was either de-configured or reset */            cdcData.isConfigured = false;            break;        case USB_DEVICE_EVENT_CONFIGURED:   // event returned from the device layer            /* pData will point to the configuration. Check the configuration */            configurationValue = ((USB_DEVICE_EVENT_DATA_CONFIGURED *)pData)->configurationValue;            if(configurationValue == 1)            {                /* Register the CDC Device application event handler here.                 * Note how the cdcData object pointer is passed as the                 * user data */                USB_DEVICE_CDC_EventHandlerSet(COM1, CDC_USBDeviceCDCEventHandler, (uintptr_t)&cdcData);                USB_DEVICE_CDC_EventHandlerSet(COM2, CDC_USBDeviceCDCEventHandler, (uintptr_t)&cdcData);                // Set the flag that the configuration is complete                 cdcData.isConfigured = true;             }            break;                   case USB_DEVICE_EVENT_SUSPENDED:            break;       case USB_DEVICE_EVENT_POWER_DETECTED:                        /* VBUS has been detected. We can attach the device */            USB_DEVICE_Attach(cdcData.deviceHandle);            break;                    case USB_DEVICE_EVENT_POWER_REMOVED:                        /* VBUS is not available. We can detach the device */            USB_DEVICE_Detach(cdcData.deviceHandle);            cdcData.isConfigured = false;            break;        default:            break;    }}void CDC_StateReset(void){    cdcData.cdcCOMPorts[COM1].isReadComplete = false;    cdcData.cdcCOMPorts[COM1].isWriteComplete = false;       cdcData.cdcCOMPorts[COM2].isReadComplete = false;    cdcData.cdcCOMPorts[COM2].isWriteComplete = false;   }// *****************************************************************// *****************************************************************// Section: Application Local Functions// *****************************************************************// *****************************************************************// write any log messages to the COM2 portvoid WriteLogMsgs(void){        if(appData.msgget == appData.msgput) return;  // nothing to do, return now        memset(com2WriteBuffer,0,sizeof(com2WriteBuffer));    strcpy((char *)com2WriteBuffer,appData.logmessages[appData.msgget]);    cdcData.cdcCOMPorts[COM2].isWriteComplete = false;    USB_DEVICE_CDC_Write(COM2,        &cdcData.cdcCOMPorts[COM2].writeTransferHandle, com2WriteBuffer,          strlen((char *)com2WriteBuffer), USB_DEVICE_CDC_TRANSFER_FLAGS_DATA_COMPLETE);     appData.msgget++;    if(appData.msgget > (MAXMSGS-1)) appData.msgget = 0;}/***************************************************************** End of File  *//*********************************************************/
+/*********************************************************/
+/*    Figure 7-39.  stack.h                              */
+/*********************************************************/
+/*********************************************************/
+
+/********************************************************************  MPLAB Harmony Application Header File  File Name:    stack.h*********************************************************************/#ifndef _STACK_H#define _STACK_H// *******************************************************************// Section: State Definitions and State Data -- STACK state machine// *******************************************************************typedef enum{    STACK_STATE_WAIT_INIT=0,      	// Wait for the TCP/IP stack to init    STACK_STATE_WAIT_FOR_IP,		// look for IP changes    STACK_STATE_IDLE                // error state, stack failed to init} STACK_STATES;typedef struct{    STACK_STATES netstate;    // The current state    IPV4_ADDR ipv4Addr;     // the numerical value of the IPv4 addr    char ipaddr[20];       // the current IPv4 address as a string    char hostname[32];      // the current hostname on this net    char iftype[32];      // the current netName (interface type))} STACKDATA;// *******************************************************************// Section: Prototypes// *******************************************************************void STACK_Initialize ( void );void STACK_SM ( void );void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);#endif /* _STACK_H *//******************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 7-40.  stack.c                              */
+/*********************************************************/
+/*********************************************************/
+
+/*********************************************************************  MPLAB Harmony Application Source File  Company:    Microchip Technology Inc.  File Name:    stack.c*********************************************************************/#include "app.h"STACKDATA stackdata;// *****************************************************************// Section: Application Initialization and State Machine Functions// *****************************************************************void STACK_Initialize ( void ){    /* Place the App state machine in its initial state. */    stackdata.netstate = STACK_STATE_WAIT_INIT;    memset(stackdata.hostname, 0, sizeof(stackdata.hostname));    memset(stackdata.ipaddr, 0, sizeof(stackdata.ipaddr));    memset(stackdata.iftype, 0, sizeof(stackdata.iftype));    stackdata.ipv4Addr.Val = 0;}void STACK_SM ( void ){    SYS_STATUS          tcpipStat;    TCPIP_NET_HANDLE    netH;    int                 nNets;    static IPV4_ADDR    dwLastIP[2] = { {-1}, {-1} };    IPV4_ADDR           ipAddr;    int                 i;    const char          *netName, *netBiosName;    bool useNBNS = false;#if defined(TCPIP_STACK_USE_NBNS)    useNBNS = true;#endif // defined(TCPIP_STACK_USE_NBNS)            switch ( stackdata.netstate )    {                    case STACK_STATE_WAIT_INIT:      // nothing to do, go to next state            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(tcpipStat < 0)            {   // some error occurred                LogMsg("TCP/IP stack initialization error");                stackdata.netstate = STACK_STATE_IDLE;            }            else if(tcpipStat == SYS_STATUS_READY)  // one time check            {                                            nNets = TCPIP_STACK_NumberOfNetworksGet();                for(i = 0; i < nNets; i++)                {                    if(useNBNS)                    {                        netH = TCPIP_STACK_IndexToNet(i);                        netBiosName = TCPIP_STACK_NetBIOSName(netH);                        LogMsg("%s on host %s - NBNS enabled", netName, netBiosName);                    }                }                stackdata.netstate = STACK_STATE_WAIT_FOR_IP;            }            break;                    case STACK_STATE_WAIT_FOR_IP:     // look for changes in IP address            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(tcpipStat < 0)            {   // some error occurred                LogMsg("TCP/IP stack error occurred!");                stackdata.netstate = STACK_STATE_IDLE;            }            else if(tcpipStat == SYS_STATUS_READY)            {                // if the IP address of an interface has changed                // display the new value on the log messages                nNets = TCPIP_STACK_NumberOfNetworksGet();                for(i = 0; i < nNets; i++)                {                    netH = TCPIP_STACK_IndexToNet(i);                    ipAddr.Val = TCPIP_STACK_NetAddress(netH);                    if(dwLastIP[i].Val != ipAddr.Val)                    {                        dwLastIP[i].Val = ipAddr.Val;                        stackdata.ipv4Addr = ipAddr;    // save the current address                        LogIPAddr(TCPIP_STACK_NetNameGet(netH), ipAddr);                    }                }            }            break;                    case STACK_STATE_IDLE:            break;    }        }void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr){   LogMsg("%s: %d.%d.%d.%d", nname,         ipv4addr.v[0], ipv4addr.v[1], ipv4addr.v[2], ipv4addr.v[3]); }/******************************************************************* End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-1.  tcpserv.h                             */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  MPLAB Harmony Application Header File   File Name:    tcpserv.h***********************************************************/  #ifndef _TCPSERV_H#define _TCPSERV_H// *********************************************************// Section: Included Files// *********************************************************// *********************************************************// Section: Type Definitions// *********************************************************// *********************************************************/* Application states  Summary:    Application states enumeration  Description:    This enumeration defines the valid application states.  */typedef enum{    /* the do-nothing state */    TCPSERV_IDLE = 0,    /* Waits for the initialization of the TCP/IP stack to complete. */    TCPSERV_WAIT_INIT,                /* Do TCP connections. */    TCPSERV_WAITFOR_CONNECTION,    /* Get connections and send data */    TCPSERV_SERVING_CONNECTION,                TCPSERV_CLOSING_CONNECTION,                                    } TCPSERV_STATES;/******* Application Data *********/typedef struct{    /* Application's current state */    TCPSERV_STATES state;    TCP_SOCKET socket;    TCP_SOCKET_INFO sktinfo;} TCPSERVDATA;void TCPSERV_Initialize ( void );void TCPSERV_SM ( void );void respond(char *);#endif /* _TCPSERV_H *//**************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-2.  tcpserv.c                             */
+/*********************************************************/
+/*********************************************************/
+
+/**********************************************************
+  File Name:
+    tcpserv.c
+**********************************************************/
+
+// *********************************************************
+// Section: Included Files
+// *********************************************************
+#include "app.h"
+
+// *********************************************************
+// Section: Global Data Definitions
+// *********************************************************
+
+/* Application Data  */
+
+TCPSERVDATA TCPSERVdata;
+extern APPDATA appData;
+extern STACKDATA stackdata;
+extern void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);
+
+#define TCP_LOCAL_PORT 9000
+#define TCP_LOCAL_HOST	"192.168.100.10"	// this local address
+//#define TCP_REMOTE_HOST	"192.168.100.20"	// the PC address
+
+// *********************************************************
+// Section: Application Initialization and State Machine Functions
+// *********************************************************
+
+void TCPSERV_Initialize ( void )
+{
+    /* Place the application state machine in its initial state. */
+    TCPSERVdata.state = TCPSERV_WAIT_INIT;
+    TCPSERVdata.socket = INVALID_SOCKET;
+    memset(&TCPSERVdata.sktinfo, 0, sizeof(TCPSERVdata.sktinfo));
+}
+
+/*************************************************************
+  Function:
+    void TCPSERV_SM( void )   // the state machine
+*****/
+void TCPSERV_SM ( void )
+{
+    SYS_STATUS      tcpipStat;
+    int count;      // number of bytes in Rx buffer
+    uint8_t  bytes[1024];   // local array when reading from Rx buffer
+    char  tmp[128];   // local array for temporary string
+    
+    switch(TCPSERVdata.state)
+    {
+         case TCPSERV_IDLE:
+            break;
+
+        case TCPSERV_WAIT_INIT:
+            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);
+            if(tcpipStat < 0)
+            {   // some error occurred
+                LogMsg("TCP: TCP/IP stack initialization failed!");
+                TCPSERVdata.state = TCPSERV_IDLE;
+            }
+            else if((tcpipStat == SYS_STATUS_READY) && (stackdata.ipv4Addr.Val > 0))
+            {
+                // now that the stack is ready, open the TCP socket
+                TCPSERVdata.socket = TCPIP_TCP_ServerOpen(IP_ADDRESS_TYPE_IPV4, TCP_LOCAL_PORT, 0);
+                if(TCPSERVdata.socket == INVALID_SOCKET)
+                {
+                    LogMsg("TCP server socket did not open!");
+                    TCPSERVdata.state = TCPSERV_IDLE;
+                    break;
+                }
+                else 
+                {
+                    LogMsg("TCP server listening on port %d", TCP_LOCAL_PORT);
+                    TCPIP_TCP_Discard(TCPSERVdata.socket);
+                    TCPIP_TCP_GetIsReady(TCPSERVdata.socket);                
+                    TCPIP_TCP_PutIsReady(TCPSERVdata.socket);                
+                    TCPSERVdata.state = TCPSERV_WAITFOR_CONNECTION;
+                }
+            }
+            break;
+
+        case TCPSERV_WAITFOR_CONNECTION:
+            if (TCPIP_TCP_IsConnected(TCPSERVdata.socket))
+            {
+                // We got a connection
+                if(TCPIP_TCP_SocketInfoGet(TCPSERVdata.socket, &TCPSERVdata.sktinfo))
+                {
+                    LogIPAddr("TCP server connected to client on", TCPSERVdata.sktinfo.remoteIPaddress.v4Add);
+                    TCPSERVdata.state = TCPSERV_SERVING_CONNECTION;
+                }
+                else
+                {
+                    LogMsg("Could not get TCP server socket info, closing socket");
+                    TCPSERVdata.state = TCPSERV_CLOSING_CONNECTION;
+                }
+            }
+            break;
+            
+        case TCPSERV_SERVING_CONNECTION:
+            
+            if (!TCPIP_TCP_IsConnected(TCPSERVdata.socket) || TCPIP_TCP_WasDisconnected(TCPSERVdata.socket))
+            {
+                LogIPAddr("TCP server closed connection to client", TCPSERVdata.sktinfo.remoteIPaddress.v4Add);
+                TCPSERVdata.state = TCPSERV_CLOSING_CONNECTION;
+                break;
+            }
+            count = TCPIP_TCP_GetIsReady(TCPSERVdata.socket);
+            if(count > 0)	// data is in Rx buffer
+            {
+                memset(tmp, 0, sizeof(tmp));
+                memset(bytes, 0, sizeof(bytes));
+                TCPIP_TCP_ArrayGet(TCPSERVdata.socket, bytes, count);   // removes the data to local store
+                sprintf(tmp, "TCP server received %d bytes on port %d from", count, TCP_LOCAL_PORT);
+        		LogIPAddr(tmp,TCPSERVdata.sktinfo.remoteIPaddress.v4Add);
+                // send a response to the request
+                respond((char *)bytes); 
+            }
+            break;
+                     
+        case TCPSERV_CLOSING_CONNECTION:
+        {
+            // Close the listening socket
+            TCPIP_TCP_Close(TCPSERVdata.socket);
+            TCPSERVdata.socket = INVALID_SOCKET;
+            LogMsg("TCP server is closed");
+            TCPSERVdata.state = TCPSERV_WAIT_INIT;     
+        }
+        break;
+
+        default:
+            break;
+    }
+}
+
+void respond(char *request)
+{
+    char *ptr;
+    // change the string to all uppercase and send it back
+    for(ptr=request; *ptr; ptr++) *ptr = toupper(*ptr);
+    
+    TCPIP_TCP_PutIsReady(TCPSERVdata.socket);
+    TCPIP_TCP_ArrayPut(TCPSERVdata.socket, (uint8_t *)request, strlen(request));
+    TCPIP_TCP_Flush(TCPSERVdata.socket);	// send it
+    TCPIP_TCP_Discard(TCPSERVdata.socket);  // clear the Rx buffer
+    LogMsg("TCP server sent response to TCP client");    
+}
+
+/*********************************************************
+ End of File
+ */
+
+
+/*********************************************************/
+/*********************************************************/
+/*    Figure 8-9.  tcpclient.h                           */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  MPLAB Harmony Application Header File   File Name:    tcpclient.h***********************************************************/  #ifndef _TCPCLIENT_H#define _TCPCLIENT_H// *********************************************************// Section: Included Files// *********************************************************// *********************************************************// Section: Type Definitions// *********************************************************// *********************************************************/* Application states  Summary:    Application states enumeration  Description:    This enumeration defines the valid application states.  */typedef enum{    /* the do-nothing state */    TCPCLIENT_IDLE = 0,    /* Waits for the initialization of the TCP/IP stack to complete. */    TCPCLIENT_WAIT_INIT,                /* Do TCP connections. */    TCPCLIENT_WAITFOR_CONNECTION,    /* Get connections and send data */    TCPCLIENT_SERVING_CONNECTION,                TCPCLIENT_CLOSING_CONNECTION,                                    } TCPCLIENT_STATES;/******* Application Data *********/typedef struct{    /* Application's current state */    TCPCLIENT_STATES state;    TCP_SOCKET socket;    TCP_SOCKET_INFO sktinfo;} TCPCLIENTDATA;void TCPCLIENT_Initialize ( void );void TCPCLIENT_SM ( void );#endif /* _TCPCLIENT_H *//**************************************************** End of File *//**********************************************************
+  File Name:
+    tcpclient.c
+**********************************************************/
+
+// *********************************************************
+// Section: Included Files
+// *********************************************************
+#include "app.h"
+
+// *********************************************************
+// Section: Global Data Definitions
+// *********************************************************
+
+/* Application Data  */
+
+TCPCLIENTDATA TCPCLIENTdata;
+extern APPDATA appData;
+extern STACKDATA stackdata;
+extern void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);
+
+#define TCP_REMOTE_PORT 8000
+//#define TCP_LOCAL_HOST	"192.168.100.10"	// this local address
+#define TCP_REMOTE_HOST	"192.168.100.8"	// the PC address
+#define TESTMSG "Hello"
+
+// *********************************************************
+// Section: Application Initialization and State Machine Functions
+// *********************************************************
+void TCPCLIENT_Initialize ( void )
+{
+    /* Place the application state machine in its initial state. */
+    TCPCLIENTdata.state = TCPCLIENT_WAIT_INIT;
+    TCPCLIENTdata.socket = INVALID_SOCKET;
+    memset(&TCPCLIENTdata.sktinfo, 0, sizeof(TCPCLIENTdata.sktinfo));
+}
+/*************************************************************
+  Function:
+    void TCPCLIENT_SM( void )   // the state machine
+*****/
+
+void TCPCLIENT_SM ( void )
+{
+    SYS_STATUS      tcpipStat;
+    int count=0;      // number of bytes in Rx buffer
+    uint8_t  bytes[1024];   // local array when reading from Rx buffer
+    switch(TCPCLIENTdata.state)
+    {
+         case TCPCLIENT_IDLE:
+            break;
+
+        case TCPCLIENT_WAIT_INIT:
+            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);
+            if(tcpipStat < 0)
+            {   // some error occurred
+                LogMsg("TCP: TCP/IP stack initialization failed!");
+                TCPCLIENTdata.state = TCPCLIENT_IDLE;
+            }
+            else if((tcpipStat == SYS_STATUS_READY) && (stackdata.ipv4Addr.Val > 0))
+            {
+                // now that the stack is ready, open the TCP socket
+                IP_MULTI_ADDRESS addr;
+                TCPIP_Helper_StringToIPAddress(TCP_REMOTE_HOST, &addr.v4Add);
+                TCPCLIENTdata.socket = TCPIP_TCP_ClientOpen(IP_ADDRESS_TYPE_IPV4, TCP_REMOTE_PORT, (IP_MULTI_ADDRESS*) &addr.v4Add);
+                if(TCPCLIENTdata.socket == INVALID_SOCKET)
+                {
+                    LogMsg("TCP client socket did not open!");
+                    TCPCLIENTdata.state = TCPCLIENT_IDLE;
+                }
+                else 
+                {
+                    TCPIP_TCP_Discard(TCPCLIENTdata.socket);
+                    TCPIP_TCP_GetIsReady(TCPCLIENTdata.socket);                
+                    TCPIP_TCP_PutIsReady(TCPCLIENTdata.socket);                
+                    TCPCLIENTdata.state = TCPCLIENT_WAITFOR_CONNECTION;
+                }
+            }
+            break;
+
+        case TCPCLIENT_WAITFOR_CONNECTION:
+            if (TCPIP_TCP_IsConnected(TCPCLIENTdata.socket))
+            {
+                // The server accepted the connection
+                if(TCPIP_TCP_SocketInfoGet(TCPCLIENTdata.socket, &TCPCLIENTdata.sktinfo))
+                {
+                    LogMsg("TCP client is connected to server %s port %d", TCP_REMOTE_HOST, TCP_REMOTE_PORT);
+                    TCPIP_TCP_PutIsReady(TCPCLIENTdata.socket);
+                    count = strlen((char *)TESTMSG);
+                    TCPIP_TCP_ArrayPut(TCPCLIENTdata.socket, (uint8_t *)TESTMSG, count);
+                    TCPIP_TCP_Flush(TCPCLIENTdata.socket);	// send it
+                    LogMsg("TCP client sent %d bytes to TCP server", count);
+                    TCPCLIENTdata.state = TCPCLIENT_SERVING_CONNECTION;
+                }
+                else
+                {
+                    LogMsg("Could not get TCP client socket info, closing socket");
+                    TCPCLIENTdata.state = TCPCLIENT_CLOSING_CONNECTION;
+                }
+            }
+            break;
+            
+        case TCPCLIENT_SERVING_CONNECTION:
+            
+            if (!TCPIP_TCP_IsConnected(TCPCLIENTdata.socket) || TCPIP_TCP_WasDisconnected(TCPCLIENTdata.socket))
+            {
+                LogIPAddr("TCP client lost connection to", TCPCLIENTdata.sktinfo.remoteIPaddress.v4Add);
+                TCPCLIENTdata.state = TCPCLIENT_CLOSING_CONNECTION;
+                break;
+            }
+            count = TCPIP_TCP_GetIsReady(TCPCLIENTdata.socket);  
+            if(count > 0)
+            {
+                memset(bytes, 0, sizeof(bytes));
+                TCPIP_TCP_ArrayGet(TCPCLIENTdata.socket, bytes, count);   // removes the data to local store
+        		LogMsg("TCP client received %d bytes", count);
+            }
+            break;
+                     
+        case TCPCLIENT_CLOSING_CONNECTION:
+        {
+            // Close the listening socket
+            TCPIP_TCP_Close(TCPCLIENTdata.socket);
+            TCPCLIENTdata.socket = INVALID_SOCKET;
+            TCPCLIENTdata.state = TCPCLIENT_WAITFOR_CONNECTION;   
+            LogMsg("TCP client connection is closed");
+        }
+        break;
+
+        default:
+            break;
+    }
+}
+
+/*********************************************************
+ End of File
+ */
+/*********************************************************/
+/*********************************************************/
+/*    Figure 8-18.  udpserv.h                            */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  MPLAB Harmony Application Header File   File Name:    udpserv.h***********************************************************/  #ifndef _UDPSERV_H#define _UDPSERV_H// *********************************************************// Section: Included Files// *********************************************************// *********************************************************// Section: Type Definitions// *********************************************************// *********************************************************/* Application states  Summary:    Application states enumeration  Description:    This enumeration defines the valid application states.  */typedef enum{    /* the do-nothing state */    UDPSERV_IDLE = 0,    /* Waits for the initialization of the UDP/IP stack to complete. */    UDPSERV_WAIT_INIT,                /* Do UDP connections. */    UDPSERV_WAITFOR_CONNECTION,    /* Get connections and send data */    UDPSERV_SERVING_CONNECTION,                                    } UDPSERV_STATES;/******* Application Data *********/typedef struct{    /* Application's current state */    UDPSERV_STATES state;    UDP_SOCKET socket;    UDP_SOCKET_INFO sktinfo;} UDPSERVDATA;void UDPSERV_Initialize ( void );void UDPSERV_SM ( void );void udprespond(char *);#endif /* _UDPSERV_H *//**************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-19.  udpserv.c                            */
+/*********************************************************/
+/*********************************************************/
+
+/**********************************************************  File Name:    udpserv.c**********************************************************/// *********************************************************// Section: Included Files// *********************************************************#include "app.h"// *********************************************************// Section: Global Data Definitions// *********************************************************/* Application Data  */UDPSERVDATA UDPSERVdata;extern APPDATA appData;extern STACKDATA stackdata;extern void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);#define UDP_LOCAL_PORT 7000#define UDP_LOCAL_HOST	"192.168.100.10"	// this local address//#define UDP_REMOTE_HOST	"192.168.100.20"	// the PC address// *********************************************************// Section: Application Initialization and State Machine Functions// *********************************************************void UDPSERV_Initialize ( void ){    /* Place the application state machine in its initial state. */    UDPSERVdata.state = UDPSERV_WAIT_INIT;    UDPSERVdata.socket = INVALID_SOCKET;    memset(&UDPSERVdata.sktinfo, 0, sizeof(UDPSERVdata.sktinfo));}/*************************************************************  Function:    void UDPSERV_SM( void )   // the state machine*****/void UDPSERV_SM ( void ){    SYS_STATUS      udpipStat;    int count;      // number of bytes in Rx buffer    uint8_t  bytes[1024];   // local array when reading from Rx buffer    char  tmp[128];   // local array for temporary string        switch(UDPSERVdata.state)    {         case UDPSERV_IDLE:            break;        case UDPSERV_WAIT_INIT:            udpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(udpipStat < 0)            {   // some error occurred                LogMsg("UDP: TCP/IP stack initialization failed!");                UDPSERVdata.state = UDPSERV_IDLE;            }            else if((udpipStat == SYS_STATUS_READY) && (stackdata.ipv4Addr.Val > 0))            {                // now that the stack is ready, open the UDP socket                UDPSERVdata.socket = TCPIP_UDP_ServerOpen(IP_ADDRESS_TYPE_IPV4, UDP_LOCAL_PORT, 0);                if(UDPSERVdata.socket == INVALID_SOCKET)                {                    LogMsg("UDP server socket did not open!");                    UDPSERVdata.state = UDPSERV_IDLE;                }                else                 {                    LogMsg("UDP server listening on port %d", UDP_LOCAL_PORT);                    TCPIP_UDP_Discard(UDPSERVdata.socket);                    TCPIP_UDP_GetIsReady(UDPSERVdata.socket);                                    TCPIP_UDP_PutIsReady(UDPSERVdata.socket);                                    UDPSERVdata.state = UDPSERV_WAITFOR_CONNECTION;                }            }            break;        case UDPSERV_WAITFOR_CONNECTION:            if (TCPIP_UDP_IsConnected(UDPSERVdata.socket))            {                // We got a connection                 if(TCPIP_UDP_SocketInfoGet(UDPSERVdata.socket, &UDPSERVdata.sktinfo))                {                    LogIPAddr("UDP server connected to client on", UDPSERVdata.sktinfo.remoteIPaddress.v4Add);                    UDPSERVdata.state = UDPSERV_SERVING_CONNECTION;                }                else                {                    LogMsg("Could not get UDP server socket info");                    UDPSERVdata.state = UDPSERV_IDLE;                }            }            break;                    case UDPSERV_SERVING_CONNECTION:                        if (!TCPIP_UDP_IsConnected(UDPSERVdata.socket))            {                LogIPAddr("UDP server closed connection to client", UDPSERVdata.sktinfo.remoteIPaddress.v4Add);                UDPSERVdata.state = UDPSERV_WAITFOR_CONNECTION;                break;            }            if((count = TCPIP_UDP_GetIsReady(UDPSERVdata.socket)) > 0)	// data is in Rx buffer            {                memset(tmp, 0, sizeof(tmp));                memset(bytes, 0, sizeof(bytes));                TCPIP_UDP_ArrayGet(UDPSERVdata.socket, bytes, count);   // removes the data to local store                sprintf(tmp, "UDP server received %d bytes on port %d from", count, UDP_LOCAL_PORT);        		LogIPAddr(tmp,UDPSERVdata.sktinfo.remoteIPaddress.v4Add);                // send a response to the request                udprespond((char *)bytes); //                UDPSERVdata.state = UDPSERV_WAITFOR_CONNECTION;            }            break;                             default:            break;    }}void udprespond(char *request){    char *ptr;    // change the string to all uppercase and send it back    for(ptr=request; *ptr; ptr++) *ptr = toupper(*ptr);        TCPIP_UDP_PutIsReady(UDPSERVdata.socket);    TCPIP_UDP_ArrayPut(UDPSERVdata.socket, (uint8_t *)request, strlen(request));    TCPIP_UDP_Flush(UDPSERVdata.socket);	// send it//    TCPIP_UDP_Discard(UDPSERVdata.socket);  // clear the Rx buffer    LogMsg("UDP server sent response to UDP client");    }/********************************************************* End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-24.  udpclient.h                          */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  MPLAB Harmony Application Header File   File Name:    udpclient.h***********************************************************/  #ifndef _UDPCLIENT_H#define _UDPCLIENT_H// *********************************************************// Section: Included Files// *********************************************************// *********************************************************// Section: Type Definitions// *********************************************************// *********************************************************/* Application states  Summary:    Application states enumeration  Description:    This enumeration defines the valid application states.  */typedef enum{    /* the do-nothing state */    UDPCLIENT_IDLE = 0,    /* Waits for the initialization of the UDP/IP stack to complete. */    UDPCLIENT_WAIT_INIT,                /* Do UDP connections. */    UDPCLIENT_WAITFOR_CONNECTION,    /* Get connections and send data */    UDPCLIENT_SERVING_CONNECTION,                                             } UDPCLIENT_STATES;/******* Application Data *********/typedef struct{    /* Application's current state */    UDPCLIENT_STATES state;    UDP_SOCKET socket;    UDP_SOCKET_INFO sktinfo;} UDPCLIENTDATA;void UDPCLIENT_Initialize ( void );void UDPCLIENT_SM ( void );#endif /* _UDPCLIENT_H *//**************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-25.  udpclient.c                          */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  File Name:    udpclient.c**********************************************************/// *********************************************************// Section: Included Files// *********************************************************#include "app.h"// *********************************************************// Section: Global Data Definitions// *********************************************************/* Application Data  */UDPCLIENTDATA UDPCLIENTdata;extern APPDATA appData;extern STACKDATA stackdata;extern void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);#define UDP_LOCAL_PORT 6000#define UDP_REMOTE_PORT 6000#define UDP_LOCAL_HOST	"192.168.100.10"	// this local address#define UDP_REMOTE_HOST	"192.168.100.8"     // the PC address#define TESTMSG "Hello"// *********************************************************// Section: Application Initialization and State Machine Functions// *********************************************************void UDPCLIENT_Initialize ( void ){    /* Place the application state machine in its initial state. */    UDPCLIENTdata.state = UDPCLIENT_WAIT_INIT;    UDPCLIENTdata.socket = INVALID_SOCKET;    memset(&UDPCLIENTdata.sktinfo, 0, sizeof(UDPCLIENTdata.sktinfo));}/*************************************************************  Function:    void UDPCLIENT_SM( void )   // the state machine*****/void UDPCLIENT_SM ( void ){    SYS_STATUS      udpipStat;    int count=0;      // number of bytes in Rx buffer    uint8_t  bytes[1024];   // local array when reading from Rx buffer    switch(UDPCLIENTdata.state)    {         case UDPCLIENT_IDLE:            break;        case UDPCLIENT_WAIT_INIT:            udpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(udpipStat < 0)            {   // some error occurred                LogMsg("UDP: TCP/IP stack initialization failed!");                UDPCLIENTdata.state = UDPCLIENT_IDLE;            }            else if((udpipStat == SYS_STATUS_READY) && (stackdata.ipv4Addr.Val > 0))            {                // now that the stack is ready, open the UDP socket                IP_MULTI_ADDRESS addr, laddr;                TCPIP_Helper_StringToIPAddress(UDP_REMOTE_HOST, &addr.v4Add);                UDPCLIENTdata.socket = TCPIP_UDP_ClientOpen(IP_ADDRESS_TYPE_IPV4, UDP_REMOTE_PORT, (IP_MULTI_ADDRESS*) &addr.v4Add);                if(UDPCLIENTdata.socket == INVALID_SOCKET)                {                    LogMsg("UDP client socket did not open!");                    UDPCLIENTdata.state = UDPCLIENT_IDLE;                }                else                 {                    // bind the socket to the specific host, port,type                    // needed to see messages from the server                    TCPIP_Helper_StringToIPAddress(UDP_LOCAL_HOST, &laddr.v4Add);                    TCPIP_UDP_Bind( UDPCLIENTdata.socket, IP_ADDRESS_TYPE_IPV4, UDP_LOCAL_PORT,(IP_MULTI_ADDRESS*) &laddr.v4Add);                    UDPCLIENTdata.state = UDPCLIENT_WAITFOR_CONNECTION;  // ready to go                }            }            break;        case UDPCLIENT_WAITFOR_CONNECTION:            if (TCPIP_UDP_IsConnected(UDPCLIENTdata.socket))            {                // The server accepted the connection                if(TCPIP_UDP_SocketInfoGet(UDPCLIENTdata.socket, &UDPCLIENTdata.sktinfo))                {                    LogMsg("UDP client is connected to server %s port %d", UDP_REMOTE_HOST, UDP_REMOTE_PORT);                    TCPIP_UDP_PutIsReady(UDPCLIENTdata.socket);                    count = strlen((char *)TESTMSG);                    TCPIP_UDP_ArrayPut(UDPCLIENTdata.socket, (uint8_t *)TESTMSG, count);                    TCPIP_UDP_Flush(UDPCLIENTdata.socket);	// send it                    TCPIP_UDP_Discard(UDPCLIENTdata.socket);    // clear the Rx buffer                    LogMsg("UDP client sent %d bytes to UDP server", count);                    UDPCLIENTdata.state = UDPCLIENT_SERVING_CONNECTION;                }                else                {                    LogMsg("Could not get UDP client socket info, closing socket");                    UDPCLIENTdata.state = UDPCLIENT_IDLE;                }            }            break;                    case UDPCLIENT_SERVING_CONNECTION:                        if (!TCPIP_UDP_IsConnected(UDPCLIENTdata.socket))            {                LogIPAddr("UDP client lost connection to", UDPCLIENTdata.sktinfo.remoteIPaddress.v4Add);                UDPCLIENTdata.state = UDPCLIENT_IDLE;                break;            }            count = TCPIP_UDP_GetIsReady(UDPCLIENTdata.socket);	            if(count > 0)            {                memset(bytes, 0, sizeof(bytes));                TCPIP_UDP_ArrayGet(UDPCLIENTdata.socket, bytes, count);   // removes the data to local store                LogMsg("UDP client received %d bytes", count);            }            break;                             default:            break;    }}/********************************************************* End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-32.  mcastserv.h                          */
+/*********************************************************/
+/*********************************************************/
+
+/**********************************************************  MPLAB Harmony Application Header File   File Name:    mcastserv.h***********************************************************/    #ifndef _MCASTSERV_H#define _MCASTSERV_H// *********************************************************// Section: Included Files// *********************************************************// *********************************************************// Section: Type Definitions// *********************************************************// *********************************************************// Application statestypedef enum{    /* the do-nothing state */    MCASTSERV_IDLE = 0,    /* Waits for the initialization of the TCP/IP stack to complete. */    MCASTSERV_WAIT_INIT,    /* Do UDP connections. */    MCASTSERV_WAITFOR_CONNECTION,    /* Get connections and Multicast datagrams. */    MCASTSERV_SERVING_CONNECTION,                /* create dynamic data for testing */    MCASTSERV_CLOSING_CONNECTION            } MCASTSERV_STATES;/******* Application Data *********/typedef struct{    /* Application's current state */    MCASTSERV_STATES state;    UDP_SOCKET socket;    UDP_SOCKET_INFO sktinfo;    unsigned int lastunixsecs;} MCASTSERVDATA;void MCASTSERV_Initialize ( void );void MCASTSERV_SM ( void );#endif /* _MCASTSERV_H *//**************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 8-33.  mcastserv.c                          */
+/*********************************************************/
+/*********************************************************/
+/**********************************************************  File Name:    mcastserv.c**********************************************************/// *********************************************************// Section: Included Files// *********************************************************#include "app.h"// *********************************************************// Section: Global Data Definitions// *********************************************************/* Application Data  */MCASTSERVDATA MCASTSERVdata;extern APPDATA appData;extern STACKDATA stackdata;extern void LogIPAddr(const char *nname, IPV4_ADDR ipv4addr);#define UDP_MULTICAST_PORT 9100#define UDP_MULTICAST_HOST	"224.168.100.110"	// a multicast address// *********************************************************// Section: Application Initialization and State Machine Functions// *********************************************************void MCASTSERV_Initialize ( void ){    /* Place the application state machine in its initial state. */    MCASTSERVdata.state = MCASTSERV_WAIT_INIT;    MCASTSERVdata.socket = INVALID_SOCKET;    memset(&MCASTSERVdata.sktinfo, 0, sizeof(MCASTSERVdata.sktinfo));    MCASTSERVdata.lastunixsecs = 0;}void MCASTSERV_SM ( void ){    SYS_STATUS          tcpipStat;    IP_MULTI_ADDRESS remaddr;     // remote address    uint8_t         testmsg[] = "Test";    int count;      // number of bytes in Rx buffer    uint8_t  mcbytes[512];   // local array when reading from Rx buffer    int txspace = 0;        // available bytes in the UDP Tx FIFO buffer        switch(MCASTSERVdata.state)    {         case MCASTSERV_IDLE:            break;        case MCASTSERV_WAIT_INIT:            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(tcpipStat < 0)            {   // some error occurred                LogMsg("MCAST: TCP/IP stack initialization failed!");                MCASTSERVdata.state = MCASTSERV_IDLE;            }            else if((tcpipStat == SYS_STATUS_READY) && (stackdata.ipv4Addr.Val > 0))            {                // now that the stack is ready, open the UDP socket for multicasting                MCASTSERVdata.socket = TCPIP_UDP_ServerOpen(IP_ADDRESS_TYPE_IPV4, UDP_MULTICAST_PORT, 0);                if(MCASTSERVdata.socket == INVALID_SOCKET)                {                   LogMsg("MCAST server socket did not open!");                   MCASTSERVdata.state = UDPSERV_IDLE;                   break;                }                else LogMsg("MCAST socket opened on port %d for multicasting", UDP_MULTICAST_PORT);                           // set the multicasting options                UDP_OPTION_MULTICAST_DATA mopt;                mopt.flagsMask = 0;     // no masks                mopt.flagsValue = 0;    // all flags OFF                                // turn on the flags we need                mopt.flagsMask = 0x2f;     // all but flag loop options set                mopt.flagsValue = 0x2f;    // flags ON                              if(!TCPIP_UDP_OptionsSet(MCASTSERVdata.socket, UDP_OPTION_MULTICAST, (void *)&mopt))                {                    LogMsg("MCAST multicast options did not get set");                    MCASTSERVdata.state = MCASTSERV_CLOSING_CONNECTION;                    break;                }                else                 {                        int mcinfo;                    if(TCPIP_UDP_OptionsGet(MCASTSERVdata.socket, UDP_OPTION_MULTICAST, &mcinfo))                    {                        LogMsg("MCAST flags = 0x%x", mcinfo);                    }                }                  // set the local and remote address                TCPIP_Helper_StringToIPAddress(UDP_MULTICAST_HOST, &remaddr.v4Add);                if(!TCPIP_UDP_DestinationIPAddressSet(MCASTSERVdata.socket, IP_ADDRESS_TYPE_IPV4, &remaddr))                {                    LogMsg("MCAST destination/group IP address did not get set");                    MCASTSERVdata.state = MCASTSERV_CLOSING_CONNECTION;                    break;                }                else LogIPAddr("MCAST destination/group IP address set to", remaddr.v4Add);                                   TCPIP_UDP_DestinationPortSet(MCASTSERVdata.socket, UDP_MULTICAST_PORT);                MCASTSERVdata.state = MCASTSERV_WAITFOR_CONNECTION;            }            break;        case MCASTSERV_WAITFOR_CONNECTION:            if (TCPIP_UDP_IsConnected(MCASTSERVdata.socket))            {                // We got a connection                if(TCPIP_UDP_SocketInfoGet(MCASTSERVdata.socket, &MCASTSERVdata.sktinfo))                {                    LogIPAddr("MCAST server connected to", MCASTSERVdata.sktinfo.remoteIPaddress.v4Add);                    // the following line is needed                    txspace = TCPIP_UDP_PutIsReady(MCASTSERVdata.socket);     // space available in FIFO                                        // send out the welcome datagram                    count = strlen((char *)testmsg);                        // bytes to send                    if(count < txspace)                    {                        TCPIP_UDP_ArrayPut(MCASTSERVdata.socket, testmsg, strlen((char *)testmsg));                        TCPIP_UDP_Flush(MCASTSERVdata.socket);	// send anything in the buffer                        LogMsg("Sent welcome message to multicast");                    }                    MCASTSERVdata.lastunixsecs = appData.unixsecs;                    MCASTSERVdata.state = MCASTSERV_SERVING_CONNECTION;                }                else                {                    LogMsg("Could not get UDP(MCAST) socket info, closing socket");                    MCASTSERVdata.state = MCASTSERV_CLOSING_CONNECTION;                }            }            break;        case MCASTSERV_SERVING_CONNECTION:            if (!TCPIP_UDP_IsConnected(MCASTSERVdata.socket))            {                LogIPAddr("Closed UDP(MCAST) connection from", MCASTSERVdata.sktinfo.remoteIPaddress.v4Add);                MCASTSERVdata.state = MCASTSERV_WAITFOR_CONNECTION;                break;            }            count = TCPIP_UDP_GetIsReady(MCASTSERVdata.socket);	// data in Rx buffer            if(count > 0)            {                memset(mcbytes, 0, sizeof(mcbytes));                TCPIP_UDP_ArrayGet(MCASTSERVdata.socket, mcbytes, count);   // removes the data to local store        		LogMsg("Received %d bytes on MCAST port", count);                // resend what was received                TCPIP_UDP_PutIsReady(MCASTSERVdata.socket);     // space available in FIFO                TCPIP_UDP_ArrayPut(MCASTSERVdata.socket, mcbytes, count);                TCPIP_UDP_Flush(MCASTSERVdata.socket);	// send it                LogMsg("Resent the %d bytes to MCAST port", count);                count = 0;            }            if(appData.unixsecs >= (MCASTSERVdata.lastunixsecs + 60))            {                MCASTSERVdata.lastunixsecs = appData.unixsecs;                // the following line is needed to make the receive work ???                txspace = TCPIP_UDP_PutIsReady(MCASTSERVdata.socket);     // space available in FIFO                // send out the welcome datagram                count = strlen((char *)testmsg);                        // bytes to send                if(count < txspace)                {                    TCPIP_UDP_ArrayPut(MCASTSERVdata.socket, testmsg, count);                    TCPIP_UDP_Flush(MCASTSERVdata.socket);	// send anything in the buffer                    LogMsg("Sending the MCAST welcome message");                }                            }            break;                    case MCASTSERV_CLOSING_CONNECTION:                       TCPIP_UDP_Close(MCASTSERVdata.socket);    // Close the socket            MCASTSERVdata.socket = INVALID_SOCKET;            MCASTSERVdata.state = MCASTSERV_IDLE;       // nothing more to do            break;                                default:            break;    }}/********************************************************* End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 9-14.  httpnet.h                            */
+/*********************************************************/
+/*********************************************************/
+/********************************************************************  MPLAB Harmony Application Header File  Company:    Microchip Technology Inc.  File Name:    httpnet.h*******************************************************************/#ifndef _HTTPNET_H#define _HTTPNET_H// ******************************************************************// Section: Included Files// ******************************************************************// ******************************************************************// Section: Type Definitions// ******************************************************************// ******************************************************************typedef enum{    /* the do-nothing state */    HTTPNET_IDLE = 0,                HTTPNET_MOUNT_DISK,     // mount the disk for web pages    /* Waits for the initialization of the TCP/IP stack to complete. */    HTTPNET_WAIT_INIT,    /* Do TCP/IP transactions. */    HTTPNET_TRANSACT,            } HTTPNET_STATES;// ******************************************************************/******* Application Data *********/typedef struct{    /* Application's current state */    HTTPNET_STATES          state;} HTTPNETDATA;void HTTPNET_Initialize ( void );void HTTPNET_SM ( void );// ******************************************************************// ******************************************************************// Section: extern declarations// ******************************************************************// ******************************************************************extern const uint8_t NVM_MEDIA_DATA[];  // web pages stored internallyextern void HTTP_APP_Initialize(void);  // initialization for the HTTPNET appextern TCPIP_HTTP_NET_IO_RESULT TCPIP_HTTP_NET_ConnectionGetExecute(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern TCPIP_HTTP_NET_IO_RESULT TCPIP_HTTP_NET_ConnectionPostExecute(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern uint8_t                  TCPIP_HTTP_NET_ConnectionFileAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const char* cFile, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern uint8_t                  TCPIP_HTTP_NET_ConnectionUserAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const char* cUser, const char* cPass, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern TCPIP_HTTP_DYN_PRINT_RES TCPIP_HTTP_NET_DynPrint(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_DYN_VAR_DCPT* vDcpt, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern void TCPIP_HTTP_NET_DynAcknowledge(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const void* buffer, const struct _tag_TCPIP_HTTP_NET_USER_CALLBACK* pCBack);extern void TCPIP_HTTP_NET_EventReport(TCPIP_HTTP_NET_CONN_HANDLE connHandle, TCPIP_HTTP_NET_EVENT_TYPE evType, const void* evInfo, const struct _tag_TCPIP_HTTP_NET_USER_CALLBACK* pCBack);#endif /* _HTTPNET_H *//******************************************************************* End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 9-15.  httpnet.c                            */
+/*********************************************************/
+/*********************************************************/
+/********************************************************************File Name:    httpnet.c********************************************************************/// ******************************************************************// Section: Included Files// ******************************************************************#include "app.h"// ******************************************************************// Section: Global Data Definitions// ******************************************************************// ******************************************************************/* Application Data  */HTTPNETDATA httpnetdata;extern APPDATA appData;extern CLKDATA clkData;extern STACKDATA stackdata;#define APP_SYS_FS_NVM_VOL          "/dev/nvma1"#define APP_SYS_FS_MOUNT_POINT      "/mnt/mchpSite1"#define APP_SYS_FS_TYPE             MPFS2#define APP_SYS_FS_TYPE_STRING      "MPFS2"// ******************************************************************// Section: Application Initialization and State Machine Functions// ******************************************************************void HTTPNET_Initialize ( void ){    // Place the application state machine in its initial state.    httpnetdata.state = HTTPNET_MOUNT_DISK;}/********************************************************************  Function:    void HTTPNET_SM( void )   // the state machine********************************************************************/void HTTPNET_SM ( void ){    SYS_STATUS          tcpipStat;    switch(httpnetdata.state)    {         case HTTPNET_IDLE:            break;        case HTTPNET_MOUNT_DISK:            if(SYS_FS_Mount(APP_SYS_FS_NVM_VOL, APP_SYS_FS_MOUNT_POINT, APP_SYS_FS_TYPE, 0, NULL) == 0)            {               httpnetdata.state = HTTPNET_WAIT_INIT;               LogMsg("The %s File System is mounted", APP_SYS_FS_TYPE_STRING);            }            break;        case HTTPNET_WAIT_INIT:            tcpipStat = TCPIP_STACK_Status(sysObj.tcpip);            if(tcpipStat < 0)            {   // some error occurred                LogMsg("APP: TCP/IP stack initialization failed!");                httpnetdata.state = HTTPNET_IDLE;            }            else if(tcpipStat == SYS_STATUS_READY)            {                // now that the stack is ready                 // register the application HTTP processing                HTTP_APP_Initialize();                LogMsg("HTTPNET initialized OK");                httpnetdata.state = HTTPNET_TRANSACT;            }            break;        case HTTPNET_TRANSACT:            break;        default:            break;    }}/************************************************************* * HTTP_NET Processing *************************************************************/// Sticky status message variable.// This is used to indicated whether or not the previous POST operation was// successful.  The application uses these to store status messages when a// POST operation redirects.  This lets the application provide status messages// after a redirect, when connection instance data has already been lost.//static bool lastSuccess = false;// Stick status message variable.  See lastSuccess for details.//static bool lastFailure = false;// Number of buffers to be used by the app for dynamic variable callbacks// #define HTTP_APP_DYNVAR_BUFFERS_NO      4#define HTTP_APP_DYNVAR_BUFFERS_NO      10// size of an allocated dynamic variable call back buffer// #define HTTP_APP_DYNVAR_BUFFER_SIZE     200#define HTTP_APP_DYNVAR_BUFFER_SIZE     400typedef struct{    uint16_t    busy;           // buffer is currently in process    uint16_t    bufferSize;     // size of the associated buffer    char        data[HTTP_APP_DYNVAR_BUFFER_SIZE];  // buffer for writing the dynamic variable callback content}HTTP_APP_DYNVAR_BUFFER;static HTTP_APP_DYNVAR_BUFFER   httpDynVarBuffers[HTTP_APP_DYNVAR_BUFFERS_NO];/******************************************************************  Section:    Application initialization and HTTP registration    Here the application registers with the HTTP module the functions    that will process the HTTP events (dynamic variables, SSI events, Post, Get, etc.)    Note that without registering the process functions with HTTP, there won't be any web page processing.    There is no default processing for a web page!*************************************************************/void HTTP_APP_Initialize(void){    int ix;    for(ix = 0; ix < sizeof(httpDynVarBuffers)/sizeof(*httpDynVarBuffers); ++ix)    {        httpDynVarBuffers[ix].busy = 0;        httpDynVarBuffers[ix].bufferSize = HTTP_APP_DYNVAR_BUFFER_SIZE;    }    TCPIP_HTTP_NET_USER_CALLBACK appHttpCBack =    {        .getExecute = TCPIP_HTTP_NET_ConnectionGetExecute,              // Process the "GET" command        .postExecute = TCPIP_HTTP_NET_ConnectionPostExecute,            // Process the "POST" command        .fileAuthenticate = TCPIP_HTTP_NET_ConnectionFileAuthenticate,  // Process the file authentication        .userAuthenticate = TCPIP_HTTP_NET_ConnectionUserAuthenticate,  // Process the user authentication        .dynamicPrint = TCPIP_HTTP_NET_DynPrint,                        // Process the dynamic variable callback        .dynamicAck = TCPIP_HTTP_NET_DynAcknowledge,                    // Acknowledgment function for when the dynamic variable processing is completed        .eventReport = TCPIP_HTTP_NET_EventReport,                      // HTTP Event notification callback    };    TCPIP_HTTP_NET_USER_HANDLE httpH = TCPIP_HTTP_NET_UserHandlerRegister(&appHttpCBack);    if(httpH == 0)        LogMsg("APP: Failed to register the HTTP callback!");}/********************************************************************  Section:    GET Form Handlers  *******************************************************************/TCPIP_HTTP_NET_IO_RESULT TCPIP_HTTP_NET_ConnectionGetExecute(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack){//    const uint8_t *ptr;    uint8_t filename[20];//    uint8_t* httpDataBuff;    // Load the file name    // Make sure uint8_t filename[] above is large enough for your longest name    SYS_FS_FileNameGet(TCPIP_HTTP_NET_ConnectionFileGet(connHandle), filename, sizeof(filename));//    httpDataBuff = TCPIP_HTTP_NET_ConnectionDataBufferGet(connHandle);    // If its the forms.htm page    return TCPIP_HTTP_NET_IO_RES_DONE;}/******************************************************************  Section:    POST Form Handlers  ******************************************************************/TCPIP_HTTP_NET_IO_RESULT TCPIP_HTTP_NET_ConnectionPostExecute(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack){    // Resolve which function to use and pass along    uint8_t filename[20];    // Load the file name    // Make sure uint8_t filename[] above is large enough for your longest name    SYS_FS_FileNameGet(TCPIP_HTTP_NET_ConnectionFileGet(connHandle), filename, sizeof(filename));    return TCPIP_HTTP_NET_IO_RES_DONE;}/******************************************************************  Section:    Authorization Handlers *****************************************************************//******************************************************************  Function:    uint8_t TCPIP_HTTP_NET_ConnectionFileAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, uint8_t *cFile, const TCPIP_HTTP_NET_USER_CALLBACK *pCBack) ******************************************************************/uint8_t TCPIP_HTTP_NET_ConnectionFileAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const char *cFile, const TCPIP_HTTP_NET_USER_CALLBACK *pCBack){    // If the filename begins with the folder "protect", then require auth    if(memcmp(cFile, (const void *)"protect", 7) == 0)        return 0x00;        // Authentication will be needed later    // You can match additional strings here to password protect other files.    // You could switch this and exclude files from authentication.    // You could also always return 0x00 to require auth for all files.    // You can return different values (0x00 to 0x79) to track "realms" for below.    return 0x80; // No authentication required}/********************************************************************  Function:    uint8_t TCPIP_HTTP_NET_ConnectionUserAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const char *cUser, const char *cPass, const TCPIP_HTTP_NET_USER_CALLBACK *pCBack) *******************************************************************/uint8_t TCPIP_HTTP_NET_ConnectionUserAuthenticate(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const char *cUser, const char *cPass, const TCPIP_HTTP_NET_USER_CALLBACK *pCBack){    if(strcmp(cUser,(const char *)"admin") == 0        && strcmp(cPass, (const char *)"microchip") == 0)        return 0x80;        // We accept this combination    // You can add additional user/pass combos here.    // If you return specific "realm" values above, you can base this    //   decision on what specific file or folder is being accessed.    // You could return different values (0x80 to 0xff) to indicate    //   various users or groups, and base future processing decisions    //   in TCPIP_HTTP_NET_ConnectionGetExecute/Post or HTTPPrint callbacks on this value.    return 0x00;            // Provided user/pass is invalid}// processing the HTTP reported events void TCPIP_HTTP_NET_EventReport(TCPIP_HTTP_NET_CONN_HANDLE connHandle, TCPIP_HTTP_NET_EVENT_TYPE evType, const void* evInfo, const struct _tag_TCPIP_HTTP_NET_USER_CALLBACK* pCBack){    char* evMsg = (char*)evInfo;    if(evMsg == 0)    {        evMsg = "none";    }    if(evType < 0) LogMsg("HTTP event: %d, info: %s", evType, evMsg);}// helper to get one of the application's dynamic buffer that are used in the // dynamic variables processingstatic HTTP_APP_DYNVAR_BUFFER* HTTP_APP_GetDynamicBuffer(void){    int ix;    HTTP_APP_DYNVAR_BUFFER* pDynBuffer;    pDynBuffer = httpDynVarBuffers;    for(ix = 0; ix < sizeof(httpDynVarBuffers)/sizeof(*httpDynVarBuffers); ix++)    {        if(pDynBuffer->busy == 0)        {            pDynBuffer->busy = 1;            return pDynBuffer;        }    }    return 0;}// processing the HTTP buffer acknowledgmentvoid TCPIP_HTTP_NET_DynAcknowledge(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const void* buffer, const struct _tag_TCPIP_HTTP_NET_USER_CALLBACK* pCBack){    HTTP_APP_DYNVAR_BUFFER* pDynBuffer = (HTTP_APP_DYNVAR_BUFFER*)((const uint8_t*)buffer - offsetof(HTTP_APP_DYNVAR_BUFFER, data));    pDynBuffer->busy = 0;}// Function that processes the dynamic variables// It uses the HTTP_APP_DynVarTbl[] for detecting which variable is currently processed// and what function should be launched.//TCPIP_HTTP_DYN_PRINT_RES TCPIP_HTTP_NET_DynPrint(TCPIP_HTTP_NET_CONN_HANDLE connHandle, const TCPIP_HTTP_DYN_VAR_DCPT* vDcpt, const TCPIP_HTTP_NET_USER_CALLBACK* pCBack){    char ascdt[28];			// constructed ascii time string    uint16_t RandVal;    size_t nChars;    // process the dynamic variable name        if(strcmp(vDcpt->dynName, "led") == 0)    {        // Determine which LED        if(vDcpt->nArgs != 0 && vDcpt->dynArgs->argType == TCPIP_HTTP_DYN_ARG_TYPE_INT32)        {            int nLed;            switch(vDcpt->dynArgs->argInt32)            {                case 0:                    nLed = LED1_Get();                    break;                case 1:                    nLed = LED2_Get();                    break;                case 2:                    nLed = LED3_Get();                    break;                default:                    nLed = 0;            }            // Print the output            const char* ledMsg = nLed ? "1": "0";            TCPIP_HTTP_NET_DynamicWriteString(vDcpt, ledMsg, false);        }    }       else if(strcmp(vDcpt->dynName, "btn") == 0)    {        // Determine which button -- only 1 button on  Curiosity board        if(vDcpt->nArgs != 0 && vDcpt->dynArgs->argType == TCPIP_HTTP_DYN_ARG_TYPE_INT32)        {            int nBtn;            switch(vDcpt->dynArgs->argInt32)            {                case 0:                    nBtn = SW1_Get();                    break;                default:                    nBtn = 0;            }            // Print the output            const char* bMsg = nBtn ? "1": "0";            TCPIP_HTTP_NET_DynamicWriteString(vDcpt, bMsg, false);        }    }       else if(strcmp(vDcpt->dynName, "currentTime") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        memset(ascdt, 0, sizeof(ascdt));        get_dt(ascdt);        strcpy(pDynBuffer->data, ascdt);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, strlen(pDynBuffer->data), true);    }    else if(strcmp(vDcpt->dynName, "pot") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        RandVal = (uint16_t)SYS_RANDOM_PseudoGet();        nChars = sprintf(pDynBuffer->data, "%d", RandVal);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, nChars, true);    }    else if(strcmp(vDcpt->dynName, "idlecount") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        sprintf(pDynBuffer->data, "%d", clkData.idlecntpersec);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, strlen(pDynBuffer->data), true);    }    else if(strcmp(vDcpt->dynName, "iftype") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        strcpy(pDynBuffer->data, stackdata.iftype);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, strlen(pDynBuffer->data), true);    }    else if(strcmp(vDcpt->dynName, "hostname") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        strcpy(pDynBuffer->data, stackdata.hostname);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, strlen(pDynBuffer->data), true);    }    else if(strcmp(vDcpt->dynName, "ipaddr") == 0)    {        HTTP_APP_DYNVAR_BUFFER* pDynBuffer =  HTTP_APP_GetDynamicBuffer();        if(pDynBuffer == 0)        {   // failed to get a buffer; retry            return TCPIP_HTTP_DYN_PRINT_RES_AGAIN;         }        strcpy(pDynBuffer->data, stackdata.ipaddr);        TCPIP_HTTP_NET_DynamicWrite(vDcpt, pDynBuffer->data, strlen(pDynBuffer->data), true);    }    else if(strcmp(vDcpt->dynName, "builddate") == 0)            TCPIP_HTTP_NET_DynamicWriteString(vDcpt, __DATE__" "__TIME__, false);    else if(strcmp(vDcpt->dynName, "version") == 0)             TCPIP_HTTP_NET_DynamicWriteString(vDcpt, (const void*)TCPIP_STACK_VERSION_STR, false);    else if(strcmp(vDcpt->dynName, "drive") == 0)            TCPIP_HTTP_NET_DynamicWriteString(vDcpt, (const void*)APP_SYS_FS_MOUNT_POINT, false);    else if(strcmp(vDcpt->dynName, "fstype") == 0)            TCPIP_HTTP_NET_DynamicWriteString(vDcpt, (const void*)APP_SYS_FS_TYPE_STRING, false);    return TCPIP_HTTP_DYN_PRINT_RES_DONE;}/****************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*    Figure 10-8.  main.c for the MZEF_baseRTOS project */
+/*********************************************************/
+/*********************************************************/
+/*****************************************************************************  MPLAB Harmony Project Main Source File    File Name:    main.c*/// ***************************************************************************// Section: Included Files, external statements, and prototypes// ***************************************************************************#include "app.h"extern APPDATA appData;extern CLKDATA clkData;void CLK1000(void);      // the 1-second clockvoid CLK100(void);       // the 100 msecond clockvoid _APP_Tasks(  void *pvParameters  );// ***************************************************************************// Section: Main Entry Point// ***************************************************************************int main ( void ){    // Initialize all MPLAB Harmony modules, followed by the application(s).     SYS_Initialize ( NULL );        // calls APP_Initialize())    // create the FreeRTOS tasks - use the following template:    // xTaskCreate(vTaskCode,"task name",STACK_SIZE,NULL,TASK_PRIORITY,NULL );      xTaskCreate((TaskFunction_t) _APP_Tasks, "APP_TASKS", 4096, NULL, 3, NULL);    xTaskCreate((TaskFunction_t) CLK1000, "CLK1000", 1024, NULL, 1, NULL);    xTaskCreate((TaskFunction_t) CLK100, "CLK100", 1024, NULL, 2, NULL);        /**************     * Start RTOS *      **************/    // Start the scheduler.    vTaskStartScheduler();     // This function never returns.         /* This code will only be reached if the idle task could not be created     inside vTaskStartScheduler(). An infinite loop is used to assist debugging     by ensuring this scenario does not result in main() exiting. */    for( ;; );        /* return ( EXIT_FAILURE );  */}// ***************************************************************************// Section: The application state machine tasks// ***************************************************************************void _APP_Tasks(  void *pvParameters  ){    while(1)    {        appData.msec_cnt++;        vTaskDelay(1 / portTICK_PERIOD_MS);    }}/***************************************************************************** End of File*//*********************************************************/
+/*********************************************************/
+/*   Figure 10-9.  tasks.c for the MZEF_baseRTOS project */
+/*********************************************************/
+/*********************************************************/
+/*********************************************************************  File Name:    tasks.c    This file is blank.  The contents have been moved to main.c *********************************************************************//*********************************************************/
+/*********************************************************/
+/*   Figure 10-10.  clks.c for the MZEF_baseRTOS project */
+/*********************************************************/
+/*********************************************************/
+/********************************************************************  MPLAB Harmony Application Source File    File Name:    clks.c ********************************************************************/#include "app.h"extern APPDATA appData;CLKDATA clkData;#define LED4BLACK   {LED4B_Set();LED4G_Set();LED4R_Set();}#define LED4WHITE   {LED4B_Clear();LED4G_Clear();LED4R_Clear();}#define LED4RED     {LED4B_Set();LED4G_Set();LED4R_Clear();}#define LED4GREEN   {LED4B_Set();LED4G_Clear();LED4R_Set();}#define LED4BLUE    {LED4B_Clear();LED4G_Set();LED4R_Set();}#define LED4YELLOW  {LED4B_Set();LED4G_Clear();LED4R_Clear();}#define LED4MAGENTA {LED4B_Clear();LED4G_Set();LED4R_Clear();}#define LED4CYAN    {LED4B_Clear();LED4G_Clear();LED4R_Set();}//********************************************************************// Section: Application routines//********************************************************************void CLKS_Initialize ( void ){        clkData.cpucycles = 0;    clkData.last_CP0 = 0;    clkData.idlecnt = 0;    clkData.idlecntpersec = 0;    clkData.clkstate = CLKS_STATE_INIT;     }// routine to monitor the switches and set the associated LEDvoid CLK100(void){    while(1)    {        if(!SW1_Get())  LED1_Toggle();        if(!SW2_Get())  LED2_Toggle();        if(!SW3_Get())  LED3_Toggle();        if(!SW4_Get())          {            LED1_Set();     // OFF            LED2_Set();     // OFF            LED3_Set();     // OFF        }        vTaskDelay( pdMS_TO_TICKS( 100 ) );    }}/* This task should execute every 1000 milliseconds. Time is measuredin ticks. The pdMS_TO_TICKS macro is used to convert millisecondsinto ticks. xLastWakeTime is automatically updated within vTaskDelayUntil() so is not explicitly updated by the task. */void CLK1000(void){    int substate = 0;    // initialize the clkData    clkData.cpucycles = 0;    clkData.last_CP0 = 0;    clkData.idlecnt = 0;    clkData.idlecntpersec = 0;    TickType_t xLastWakeTime;    const TickType_t xPeriod = pdMS_TO_TICKS( 1000 );    /* The xLastWakeTime variable needs to be initialized with      the current tick count. Note that this is the only time the     variable is written to. After this, xLastWakeTime is updated     automatically internally within vTaskDelayUntil(). */    xLastWakeTime = xTaskGetTickCount();    for( ;; )    {            // Perform the periodic actions here.         // cycles/sec        clkData.cpucycles = _CP0_GET_COUNT()-clkData.last_CP0;         // store the current value        clkData.last_CP0 = _CP0_GET_COUNT();          // store the idle counter        clkData.idlecntpersec = clkData.idlecnt;        // reset the idle counter        clkData.idlecnt = 0;                                // cycle the multicolored LED through all the combos        substate++;        if(substate == 1) LED4WHITE        else if(substate == 2) LED4RED        else if(substate == 3) LED4GREEN        else if(substate == 4) LED4BLUE        else if(substate == 5) LED4YELLOW        else if(substate == 6) LED4CYAN        else if(substate == 7) LED4MAGENTA        else LED4BLACK        if(substate > 7) substate = 0;        // toggle the LEDs while button is not pressed        if(SW4_Get())          {            LED1_Toggle();            LED2_Toggle();            LED3_Toggle();        }        // update the global time variables        appData.unixsecs++;    // update the UNIX time by 1 second        appData.msec_cnt = 0;  // sync with the unixsecs update                vTaskDelayUntil( &xLastWakeTime, xPeriod );        // possible alternative        // vTaskDelay( pdMS_TO_TICKS( 1000 ) );       }}/***************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/* Figure 10-13. main.c for the MZEF_httpnetRTOS project */
+/*********************************************************/
+/*********************************************************/
+/*****************************************************************************  MPLAB Harmony Project Main Source File    File Name:    main.c*/// ***************************************************************************// Section: Included Files, external statements, and prototypes// ***************************************************************************#include "app.h"extern APPDATA appData;extern CLKDATA clkData;void CLK1000(void);      // the 1-second clockvoid CLK100(void);       // the 100 msecond clockvoid _APP_Tasks(  void *pvParameters  );// ***************************************************************************// Section: Main Entry Point// ***************************************************************************int main ( void ){    // Initialize all MPLAB Harmony modules, followed by the application(s).     SYS_Initialize ( NULL );        // calls APP_Initialize())    CDC_Initialize();    STACK_Initialize();    HTTPNET_Initialize();        // create the FreeRTOS tasks - use the following template:    // xTaskCreate(vTaskCode,"task name",STACK_SIZE,NULL,TASK_PRIORITY,NULL );      xTaskCreate((TaskFunction_t) _APP_Tasks, "APP_TASKS", 8192, NULL, 3, NULL);    xTaskCreate((TaskFunction_t) CLK1000, "CLK1000", 1024, NULL, 1, NULL);    xTaskCreate((TaskFunction_t) CLK100, "CLK100", 1024, NULL, 2, NULL);          /**************     * Start RTOS *      **************/    // Start the scheduler.    vTaskStartScheduler();     // This function never returns.         /* This code will only be reached if the idle task could not be created     inside vTaskStartScheduler(). An infinite loop is used to assist debugging     by ensuring this scenario does not result in main() exiting. */    for( ;; );        /* return ( EXIT_FAILURE );  */}// ***************************************************************************// Section: The application state machine tasks// ***************************************************************************void _APP_Tasks(  void *pvParameters  ){    while(1)    {        appData.msec_cnt++;               // The SYS_Tasks        DRV_MEMORY_Tasks(sysObj.drvMemory0);        NET_PRES_Tasks(sysObj.netPres);              TCPIP_STACK_Task(sysObj.tcpip);        DRV_MIIM_Tasks(sysObj.drvMiim);        DRV_USBHS_Tasks(sysObj.drvUSBHSObject);        USB_DEVICE_Tasks(sysObj.usbDevObject0);        SYS_FS_Tasks();                        // The application tasks        CDC_SM();        STACK_SM();        HTTPNET_SM();        vTaskDelay(1 / portTICK_PERIOD_MS);    }}/***************************************************************************** End of File*//*********************************************************/
+/*********************************************************/
+/* Figure 10-14. tasks.c for the MZEF_httpnetRTOS project*/
+/*********************************************************/
+/*********************************************************/
+/*********************************************************************  File Name:    tasks.c    This file is blank.  The contents have been moved to main.c *********************************************************************//*********************************************************/
+/*********************************************************/
+/* Figure 10-15.  clks.c for the MZEF_httpnetRTOS project */
+/*********************************************************/
+/*********************************************************/
+/********************************************************************  MPLAB Harmony Application Source File    File Name:    clks.c ********************************************************************/#include "app.h"extern APPDATA appData;CLKDATA clkData;#define LED4BLACK   {LED4B_Set();LED4G_Set();LED4R_Set();}#define LED4WHITE   {LED4B_Clear();LED4G_Clear();LED4R_Clear();}#define LED4RED     {LED4B_Set();LED4G_Set();LED4R_Clear();}#define LED4GREEN   {LED4B_Set();LED4G_Clear();LED4R_Set();}#define LED4BLUE    {LED4B_Clear();LED4G_Set();LED4R_Set();}#define LED4YELLOW  {LED4B_Set();LED4G_Clear();LED4R_Clear();}#define LED4MAGENTA {LED4B_Clear();LED4G_Set();LED4R_Clear();}#define LED4CYAN    {LED4B_Clear();LED4G_Clear();LED4R_Set();}//********************************************************************// Section: Application routines//********************************************************************void CLKS_Initialize ( void ){        clkData.cpucycles = 0;    clkData.last_CP0 = 0;    clkData.idlecnt = 0;    clkData.idlecntpersec = 0;    clkData.clkstate = CLKS_STATE_INIT;     }// routine to monitor the switches and set the associated LEDvoid CLK100(void){    while(1)    {        if(!SW1_Get())  LED1_Toggle();        if(!SW2_Get())  LED2_Toggle();        if(!SW3_Get())  LED3_Toggle();        if(!SW4_Get())          {            LED1_Set();     // OFF            LED2_Set();     // OFF            LED3_Set();     // OFF        }        vTaskDelay( pdMS_TO_TICKS( 100 ) );    }}/* This task should execute every 1000 milliseconds. Time is measuredin ticks. The pdMS_TO_TICKS macro is used to convert millisecondsinto ticks. xLastWakeTime is automatically updated within vTaskDelayUntil() so is not explicitly updated by the task. */void CLK1000(void){    int substate = 0;    // initialize the clkData    clkData.cpucycles = 0;    clkData.last_CP0 = 0;    clkData.idlecnt = 0;    clkData.idlecntpersec = 0;    TickType_t xLastWakeTime;    const TickType_t xPeriod = pdMS_TO_TICKS( 1000 );    /* The xLastWakeTime variable needs to be initialized with      the current tick count. Note that this is the only time the     variable is written to. After this, xLastWakeTime is updated     automatically internally within vTaskDelayUntil(). */    xLastWakeTime = xTaskGetTickCount();    for( ;; )    {            // Perform the periodic actions here.         // cycles/sec        clkData.cpucycles = _CP0_GET_COUNT()-clkData.last_CP0;         // store the current value        clkData.last_CP0 = _CP0_GET_COUNT();          // store the idle counter        clkData.idlecntpersec = clkData.idlecnt;        // reset the idle counter        clkData.idlecnt = 0;                                // cycle the multicolored LED through all the combos        substate++;        if(substate == 1) LED4WHITE        else if(substate == 2) LED4RED        else if(substate == 3) LED4GREEN        else if(substate == 4) LED4BLUE        else if(substate == 5) LED4YELLOW        else if(substate == 6) LED4CYAN        else if(substate == 7) LED4MAGENTA        else LED4BLACK        if(substate > 7) substate = 0;        // toggle the LEDs while button is not pressed        if(SW4_Get())          {            LED1_Toggle();            LED2_Toggle();            LED3_Toggle();        }        // update the global time variables        appData.unixsecs++;    // update the UNIX time by 1 second        appData.msec_cnt = 0;  // sync with the unixsecs update                vTaskDelayUntil( &xLastWakeTime, xPeriod );        // possible alternative        // vTaskDelay( pdMS_TO_TICKS( 1000 ) );       }}/***************************************************************** End of File *//*********************************************************/
+/*********************************************************/
+/*  END SOURCE CODE FOR LearnHv3 book                    */
+/*********************************************************/
+/*********************************************************/
+

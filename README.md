@@ -9,7 +9,7 @@ When you are working the examples in the book, you will want to copy (rather tha
 
 ### Download the files to your local machine.
 * Click on the green “Code” button, then select the “Download zip” option.  
-* A zip-file, named “PIC32MZdownloads-master.zip”, will be transferred to your computer.  It may go directly to the Downloads folder or the browser may ask where it should go.  In any case, move the zip-file to the Harmony folder (the folder where Harmony was installed and at the same level as the v3 folder).
+* A zip-file, named “PICMZdownloads-master.zip”, will be transferred to your computer.  It may go directly to the Downloads folder or the browser may ask where it should go.  In any case, move the zip-file to the Harmony folder (the folder where Harmony was installed and at the same level as the v3 folder).
 * Unzip the file (i.e. extract the files) starting at the same level as the zip-file.  The source code file (LearnHv3_Figures.txt) and the web pages folder (simple_example.zip) are now available when needed in the upcoming chapters.
 
 ### EXAMPLE: Replacing the text in an MPLAB X source code file
